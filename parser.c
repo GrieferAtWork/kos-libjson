@@ -363,7 +363,7 @@ NOTHROW_NCX(CC libjson_parser_init)(struct json_parser *__restrict self,
 	self->jp_pos      = (char *)start;
 	self->jp_end      = (char *)end;
 	self->jp_encoding = JSON_ENCODING_UTF8;
-	if likely((char *)start + 4 < end) {
+	if likely((char *)start + 4 < (char *)end) {
 		/* Automatically determine input encoding:
 		 *      00 00 00 xx   UTF-32BE
 		 *      00 xx 00 xx   UTF-16BE
