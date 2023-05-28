@@ -20,11 +20,11 @@
 #ifndef GUARD_LIBJSON_API_H
 #define GUARD_LIBJSON_API_H 1
 
+#ifndef LIBJSON_NO_SYSTEM_INCLUDES
 #include <hybrid/compiler.h>
-
 #include <kos/config/config.h> /* Pull in config-specific macro overrides */
-
 #include <libjson/api.h>
+#endif /* !LIBJSON_NO_SYSTEM_INCLUDES */
 
 #define CC LIBJSON_CC
 

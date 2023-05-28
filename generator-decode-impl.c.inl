@@ -51,7 +51,11 @@ DECL_BEGIN
 
 #ifndef LIBJSON_EMPTY_STRING_DEFINED
 #define LIBJSON_EMPTY_STRING_DEFINED 1
+#ifdef LIBJSON_NO_PARSER_GETSTRING
+PRIVATE char const libjson_empty_string[1] = { 0 };
+#else /* LIBJSON_NO_PARSER_GETSTRING */
 INTDEF char const libjson_empty_string[1];
+#endif /* !LIBJSON_NO_PARSER_GETSTRING */
 #endif /* !LIBJSON_EMPTY_STRING_DEFINED */
 
 INTERN LOCAL_IF_DECODE_ELSE(NONNULL((1, 2, 3, 4)), NONNULL((1, 2, 3))) int

@@ -22,11 +22,11 @@
 
 #include "api.h"
 
+#ifndef LIBJSON_NO_SYSTEM_INCLUDES
 #include <kos/types.h>
-
 #include <format-printer.h>
-
 #include <libjson/parser.h>
+#endif /* !LIBJSON_NO_SYSTEM_INCLUDES */
 
 DECL_BEGIN
 
@@ -56,6 +56,20 @@ NOTHROW_NCX(CC libjson_parser_yield)(struct json_parser *__restrict self);
  * @return: JSON_ERROR_SYNTAX: Syntax error. */
 INTDEF NONNULL((1)) int
 NOTHROW_NCX(CC libjson_parser_unyield)(struct json_parser *__restrict self);
+
+/* Same as `libjson_parser_yield()', but don't actually advance the parser (*<ptr>)
+ * @return: JSON_PARSER_*:     The currently selected token
+ * @return: JSON_ERROR_EOF:    The end of the input file has been reached.
+ * @return: JSON_ERROR_SYNTAX: Syntax error. */
+INTDEF NONNULL((1)) int
+NOTHROW_NCX(CC libjson_parser_peeknext)(struct json_parser const *__restrict self);
+
+/* Same as `libjson_parser_unyield()', but don't actually rewind the parser (*(<ptr> - 1))
+ * @return: JSON_PARSER_*:     The previously selected token
+ * @return: JSON_ERROR_EOF:    The start of the input file had already been reached.
+ * @return: JSON_ERROR_SYNTAX: Syntax error. */
+INTDEF NONNULL((1)) int
+NOTHROW_NCX(CC libjson_parser_peekprev)(struct json_parser const *__restrict self);
 
 /* Rewind to the start of the current object/array
  * @return: JSON_PARSER_ARRAY:  The parser now points at the first token following the initial `['.
@@ -116,12 +130,6 @@ INTDEF NONNULL((1)) int
 NOTHROW_NCX(CC libjson_parser_leavearray)(struct json_parser *__restrict self);
 
 
-/* Returns the current parser state / token type.
- * @return: JSON_PARSER_*: The current parser state.
- * @return: JSON_ERROR_SYNTAX: Syntax error. */
-INTDEF NONNULL((1)) int
-NOTHROW_NCX(CC libjson_parser_state)(struct json_parser *__restrict self);
-
 /* Search for the given key within the current object.
  * The given key is searched in both forward, and backward direction, starting
  * at the current parser location. - If  the key exists multiple times, it  is
@@ -134,6 +142,7 @@ NOTHROW_NCX(CC libjson_parser_findkey)(struct json_parser *__restrict self,
                                        /*utf-8*/ char const *__restrict key,
                                        size_t keylen);
 
+#ifndef LIBJSON_NO_PARSER_FINDINDEX
 /* Goto  the  `index'th'  array element  before  returning `JSON_ERROR_OK'
  * The parser is rewound to the start of the current array before skipping
  * exactly `index' elements, thus causing that element to end up selected.
@@ -148,6 +157,7 @@ NOTHROW_NCX(CC libjson_parser_findkey)(struct json_parser *__restrict self,
 INTDEF NONNULL((1)) int
 NOTHROW_NCX(CC libjson_parser_findindex)(struct json_parser *__restrict self,
                                          uintptr_t index);
+#endif /* !LIBJSON_NO_PARSER_FINDINDEX */
 
 /* Check if the current parser token (which should be a string) is equal to `str'
  * @return: JSON_ERROR_OK:     The  previous  token  is  was  a   string  that  was  equal  to   `str'
@@ -176,6 +186,7 @@ NOTHROW_NCX(CC libjson_parser_printstring)(struct json_parser *__restrict self,
                                            pformatprinter printer, void *arg,
                                            ssize_t *__restrict pprinter_result);
 
+#ifndef LIBJSON_NO_PARSER_GETSTRING
 /* A somewhat hacky variant of `libjson_parser_printstring()', which replaces the source
  * string  in-line (thus  modifying the source  string) with its  utf-8 encoded variant.
  * This is done by re-encoding the string using a special extension syntax token that is
@@ -195,8 +206,10 @@ NOTHROW_NCX(CC libjson_parser_printstring)(struct json_parser *__restrict self,
 INTDEF WUNUSED NONNULL((1)) /*utf-8*/ char *
 NOTHROW_NCX(CC libjson_parser_getstring)(struct json_parser *__restrict self,
                                          size_t *plength, int *perror);
+#endif /* !LIBJSON_NO_PARSER_GETSTRING */
 
 
+#ifndef LIBJSON_NO_PARSER_GETNUMBER
 /* Decode a Json number and store its value in `*presult'
  * @return: JSON_ERROR_OK:     Success. - The number is stored in `*presult'
  *                             In this case the parser points at the first token after the number
@@ -221,7 +234,9 @@ INTDEF NONNULL((1, 2)) int
 NOTHROW_NCX(CC libjson_parser_getfloat)(struct json_parser *__restrict self,
                                         double *__restrict presult);
 #endif /* !__NO_FPU */
+#endif /* !LIBJSON_NO_PARSER_GETNUMBER */
 
+#ifndef LIBJSON_NO_PARSER_GETBOOL
 /* Decode a Json boolean and store its value in `*presult'
  * @return: JSON_ERROR_OK:     Success. - The value is stored in `*presult'
  *                             In this case the parser points at the first token after an optional trailing `,'
@@ -231,7 +246,9 @@ NOTHROW_NCX(CC libjson_parser_getfloat)(struct json_parser *__restrict self,
 INTDEF NONNULL((1, 2)) int
 NOTHROW_NCX(CC libjson_parser_getbool)(struct json_parser *__restrict self,
                                        bool *__restrict presult);
+#endif /* !LIBJSON_NO_PARSER_GETBOOL */
 
+#ifndef LIBJSON_NO_PARSER_GETNULL
 /* Decode a Json null-value
  * @return: JSON_ERROR_OK:     Success.
  *                             In this case the parser points at the first token after an optional trailing `,'
@@ -240,6 +257,7 @@ NOTHROW_NCX(CC libjson_parser_getbool)(struct json_parser *__restrict self,
  * @return: JSON_ERROR_SYNTAX: Syntax error. */
 INTDEF NONNULL((1)) int
 NOTHROW_NCX(CC libjson_parser_getnull)(struct json_parser *__restrict self);
+#endif /* !LIBJSON_NO_PARSER_GETNULL */
 
 
 DECL_END

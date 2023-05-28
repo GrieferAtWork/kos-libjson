@@ -24,8 +24,10 @@
 #include "api.h"
 /**/
 
+#ifndef LIBJSON_NO_SYSTEM_INCLUDES
 #include <kos/types.h>
 
+#include <assert.h>
 #include <format-printer.h>
 #include <inttypes.h>
 #include <stdarg.h>
@@ -36,18 +38,24 @@
 #include <unicode.h>
 
 #include <libjson/writer.h>
+#endif /* !LIBJSON_NO_SYSTEM_INCLUDES */
 
 #include "writer.h"
 
 DECL_BEGIN
 
-/* Json writer helper functions.
+/* JSON writer helper functions.
  * Note all of these have the same return value convention:
  * @return:  0: Success
- * @return: -1: Error: `self->jw_result' has a negative value when the function was called.
  * @return: -1: Error: An invocation of the `self->jw_printer' returned a negative value.
- * @return: -2: Error: Invalid usage during this, or during an earlier call. */
+ * @return: -1: Error: `self->jw_result' has a negative value when the function was called.
+ *                     (only if `LIBJSON_NO_WRITER_CALLS_IN_BAD_STATE' isn't defined)
+ * @return: -2: Error: Invalid usage during this, or during an earlier call.
+ *                     (only if `JSON_WRITER_STATE_BADUSAGE' exists) */
 
+#ifdef LIBJSON_NO_WRITER_CALLS_IN_BAD_STATE
+#define CHK_STATE() (void)0
+#elif defined(JSON_WRITER_STATE_BADUSAGE)
 #define CHK_STATE()                                       \
 	do {                                                  \
 		if (self->jw_result < 0)                          \
@@ -55,6 +63,13 @@ DECL_BEGIN
 		if (self->jw_state == JSON_WRITER_STATE_BADUSAGE) \
 			return -2;                                    \
 	}	__WHILE0
+#else /* JSON_WRITER_STATE_BADUSAGE */
+#define CHK_STATE()              \
+	do {                         \
+		if (self->jw_result < 0) \
+			goto err;            \
+	}	__WHILE0
+#endif /* !JSON_WRITER_STATE_BADUSAGE */
 
 
 LOCAL NONNULL((1, 2)) int CC
@@ -105,12 +120,12 @@ json_linefeed_and_indent(struct json_writer *__restrict self) {
 		char buf[16];
 		buf[0] = '\n';
 		if likely(self->jw_depth <= lengthof(buf) - 1) {
-			memset(buf + 1, '\t', self->jw_depth, sizeof(char));
+			memsetc(buf + 1, '\t', self->jw_depth, sizeof(char));
 			if unlikely(json_print(self, buf, self->jw_depth + 1))
 				goto err;
 		} else {
 			unsigned int missing;
-			memset(buf + 1, '\t', lengthof(buf) - 1, sizeof(char));
+			memsetc(buf + 1, '\t', lengthof(buf) - 1, sizeof(char));
 			if unlikely(json_print(self, buf, lengthof(buf)))
 				goto err;
 			missing = self->jw_depth - (lengthof(buf) - 1);
@@ -169,11 +184,17 @@ LOCAL NONNULL((1, 2)) int CC
 json_endcomponent(struct json_writer *__restrict self,
                   char const *__restrict data, size_t len) {
 	CHK_STATE();
+#ifdef JSON_WRITER_STATE_BADUSAGE
 	if unlikely(self->jw_depth == 0 ||
 	            self->jw_state == JSON_WRITER_STATE_ONFIELD) {
 		self->jw_state = JSON_WRITER_STATE_BADUSAGE;
 		return -2;
 	}
+#else /* JSON_WRITER_STATE_BADUSAGE */
+	assertf(self->jw_depth != 0 &&
+	        self->jw_state != JSON_WRITER_STATE_ONFIELD,
+	        "Bad usage!");
+#endif /* !JSON_WRITER_STATE_BADUSAGE */
 	if (self->jw_state == JSON_WRITER_STATE_SIBLING) {
 		--self->jw_depth;
 		if unlikely(json_linefeed_and_indent(self))
@@ -293,12 +314,18 @@ libjson_writer_addfield(struct json_writer *__restrict self,
                         size_t keylen) {
 	int error;
 	CHK_STATE();
+#ifdef JSON_WRITER_STATE_BADUSAGE
 	if unlikely(self->jw_depth == 0 ||
 	            self->jw_state == JSON_WRITER_STATE_ONFIELD) {
 		/* Don't allow fields at the root-scope, or following another field. */
 		self->jw_state = JSON_WRITER_STATE_BADUSAGE;
 		return -2;
 	}
+#else /* JSON_WRITER_STATE_BADUSAGE */
+	assertf(self->jw_depth != 0 &&
+	        self->jw_state != JSON_WRITER_STATE_ONFIELD,
+	        "Bad usage: Don't allow fields at the root-scope, or following another field.");
+#endif /* !JSON_WRITER_STATE_BADUSAGE */
 	if unlikely(json_print_prefixes(self))
 		goto err;
 	error = json_print_string(self, key, keylen);
@@ -327,7 +354,19 @@ err:
 	return -1;
 }
 
+INTERN NONNULL((1)) int CC
+libjson_writer_putvalue(struct json_writer *__restrict self) {
+	CHK_STATE();
+	if unlikely(json_print_prefixes(self))
+		goto err;
+	self->jw_state = JSON_WRITER_STATE_SIBLING;
+	return 0;
+err:
+	return -1;
+}
 
+
+#ifndef LIBJSON_NO_WRITER_PUTNUMBER
 INTERN NONNULL((1)) int CC
 libjson_writer_putnumber(struct json_writer *__restrict self, intptr_t value) {
 	CHK_STATE();
@@ -385,7 +424,9 @@ libjson_writer_putfloat(struct json_writer *__restrict self,
 err:
 	return -1;
 }
+#endif /* !LIBJSON_NO_WRITER_PUTNUMBER */
 
+#if !defined(LIBJSON_NO_WRITER_PUTBOOL) || !defined(LIBJSON_NO_WRITER_PUTNULL)
 LOCAL NONNULL((1)) int CC
 json_putkeyword(struct json_writer *__restrict self,
                 char const *__restrict kwd, size_t len) {
@@ -399,7 +440,9 @@ json_putkeyword(struct json_writer *__restrict self,
 err:
 	return -1;
 }
+#endif /* !LIBJSON_NO_WRITER_PUTBOOL || !LIBJSON_NO_WRITER_PUTNULL */
 
+#ifndef LIBJSON_NO_WRITER_PUTBOOL
 INTERN NONNULL((1)) int CC
 libjson_writer_putbool(struct json_writer *__restrict self,
                        bool value) {
@@ -411,11 +454,14 @@ libjson_writer_putbool(struct json_writer *__restrict self,
 	}
 	return result;
 }
+#endif /* !LIBJSON_NO_WRITER_PUTBOOL */
 
+#ifndef LIBJSON_NO_WRITER_PUTNULL
 INTERN NONNULL((1)) int CC
 libjson_writer_putnull(struct json_writer *__restrict self) {
 	return json_putkeyword(self, "null", 4);
 }
+#endif /* !LIBJSON_NO_WRITER_PUTNULL */
 
 
 
@@ -425,12 +471,19 @@ DEFINE_PUBLIC_ALIAS(json_writer_endobject, libjson_writer_endobject);
 DEFINE_PUBLIC_ALIAS(json_writer_endarray, libjson_writer_endarray);
 DEFINE_PUBLIC_ALIAS(json_writer_addfield, libjson_writer_addfield);
 DEFINE_PUBLIC_ALIAS(json_writer_putstring, libjson_writer_putstring);
+DEFINE_PUBLIC_ALIAS(json_writer_putvalue, libjson_writer_putvalue);
+#ifndef LIBJSON_NO_WRITER_PUTNUMBER
 DEFINE_PUBLIC_ALIAS(json_writer_putnumber, libjson_writer_putnumber);
 DEFINE_PUBLIC_ALIAS(json_writer_putint64, libjson_writer_putint64);
 DEFINE_PUBLIC_ALIAS(json_writer_putuint64, libjson_writer_putuint64);
 DEFINE_PUBLIC_ALIAS(json_writer_putfloat, libjson_writer_putfloat);
+#endif /* !LIBJSON_NO_WRITER_PUTNUMBER */
+#ifndef LIBJSON_NO_WRITER_PUTBOOL
 DEFINE_PUBLIC_ALIAS(json_writer_putbool, libjson_writer_putbool);
+#endif /* !LIBJSON_NO_WRITER_PUTBOOL */
+#ifndef LIBJSON_NO_WRITER_PUTNULL
 DEFINE_PUBLIC_ALIAS(json_writer_putnull, libjson_writer_putnull);
+#endif /* !LIBJSON_NO_WRITER_PUTNULL */
 
 DECL_END
 

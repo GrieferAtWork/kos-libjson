@@ -25,6 +25,7 @@
 #include "api.h"
 /**/
 
+#ifndef LIBJSON_NO_SYSTEM_INCLUDES
 #include <hybrid/byteorder.h>
 #include <hybrid/byteswap.h>
 #include <hybrid/unaligned.h>
@@ -35,6 +36,7 @@
 #include <string.h>
 #include <uchar.h>
 #include <unicode.h>
+#endif /* !LIBJSON_NO_SYSTEM_INCLUDES */
 
 #include "parser.h"
 
@@ -345,12 +347,12 @@ again:
 	self->jp_pos = prev;
 }
 
-/* Initialize a json parser with the given piece of in-memory json.
+/* Initialize a JSON parser with the given piece of in-memory JSON.
  * NOTE: This function automatically detects  the encoding (one of  `JSON_ENCODING_*')
- *       of the given input, as  specified by the Json  specs, meaning you don't  have
+ *       of the given input, as  specified by the JSON  specs, meaning you don't  have
  *       to concern yourself with the details on how to supply input to this function.
- * @param: start: Pointer to the start of json input data (usually points to a c-string)
- * @param: end:   Pointer to the first byte past the last piece of json input data (usually
+ * @param: start: Pointer to the start of JSON input data (usually points to a c-string)
+ * @param: end:   Pointer to the first byte past the last piece of JSON input data (usually
  *                equal  to `strend(start)', though note that the input string doesn't need
  *                to be NUL-terminated. - Only bytes `x' with `x >= start && x < end'  will
  *                ever be accessed) */
@@ -383,11 +385,14 @@ NOTHROW_NCX(CC libjson_parser_init)(struct json_parser *__restrict self,
 			                    : JSON_ENCODING_UTF16LE;
 		}
 	}
+
 	/* Skip leading whitespace. */
 	json_skip_whitespace(self);
 }
 
-INTERN NONNULL((1, 2)) void
+
+#ifndef LIBJSON_NO_PARSER_GETSTRING
+PRIVATE NONNULL((1, 2)) void
 NOTHROW_NCX(CC json_skip_utf8string_trailing_nuls)(struct json_parser *__restrict self,
                                                    char const *__restrict new_pointer) {
 	switch (self->jp_encoding) {
@@ -441,6 +446,20 @@ NOTHROW_NCX(CC json_truncate_pos_for_alignment)(struct json_parser *__restrict s
 	}
 	self->jp_pos = new_pointer;
 }
+#endif /* !LIBJSON_NO_PARSER_GETSTRING */
+
+/* All of the following are assumptions made by the token parser functions below. */
+static_assert(JSON_PARSER_EOF == 0);
+static_assert(JSON_PARSER_OBJECT == '{');
+static_assert(JSON_PARSER_ENDOBJECT == '}');
+static_assert(JSON_PARSER_ARRAY == '[');
+static_assert(JSON_PARSER_ENDARRAY == ']');
+static_assert(JSON_PARSER_STRING == '\"');
+static_assert(JSON_PARSER_COLON == ':');
+static_assert(JSON_PARSER_COMMA == ',');
+static_assert(JSON_PARSER_NULL == 'n');
+static_assert(JSON_PARSER_TRUE == 't');
+static_assert(JSON_PARSER_FALSE == 'f');
 
 /* Yield to the current token and advance to the next one (*<ptr>++)
  * @return: JSON_PARSER_*:     The previously selected token (the parser now points at its end)
@@ -459,18 +478,24 @@ again:
 
 	case 0:
 		/* Check for end-of-file */
+#ifdef LIBJSON_NO_PARSER_GETSTRING
+		return JSON_ERROR_EOF;
+#else /* LIBJSON_NO_PARSER_GETSTRING */
 		if (self->jp_pos >= self->jp_end)
 			return JSON_ERROR_EOF;
 		/* transformed utf-8 string */
 		json_skip_utf8string_trailing_nuls(self, strend(self->jp_pos));
 		result = JSON_PARSER_STRING;
 		break;
+#endif /* !LIBJSON_NO_PARSER_GETSTRING */
 
+#ifndef LIBJSON_NO_PARSER_GETSTRING
 	case 1:
 		prev = (char const *)memxendb(self->jp_pos, 1, (size_t)(self->jp_end - self->jp_pos));
 		json_truncate_pos_for_alignment(self, prev);
 		result = JSON_PARSER_STRING;
 		break;
+#endif /* !LIBJSON_NO_PARSER_GETSTRING */
 
 #ifndef CONFIG_NO_LIBJSON_SUPPORTS_C_COMMENT
 	case '/':
@@ -593,6 +618,7 @@ do_digit_inner:
 		/* Anything else isn't allowed and indicates a syntax error. */
 		goto syn1;
 	}
+
 	/* Skip trailing whitespace. */
 	json_skip_whitespace(self);
 #ifndef CONFIG_NO_LIBJSON_SUPPORTS_C_COMMENT
@@ -626,6 +652,7 @@ again:
 	assert(self->jp_pos <= self->jp_end);
 	ch = json_ungetc(self);
 	switch (ch) {
+
 		/* Single-character tokens. */
 	case '[': case ']':
 	case '{': case '}':
@@ -634,6 +661,9 @@ again:
 		break;
 
 	case 0:
+#ifdef LIBJSON_NO_PARSER_GETSTRING
+		return JSON_ERROR_EOF;
+#else /* LIBJSON_NO_PARSER_GETSTRING */
 		/* Check for end-of-file */
 		if (self->jp_pos <= self->jp_start)
 			return JSON_ERROR_EOF;
@@ -650,7 +680,9 @@ again:
 			result = JSON_PARSER_STRING;
 		}
 		break;
+#endif /* !LIBJSON_NO_PARSER_GETSTRING */
 
+#ifndef LIBJSON_NO_PARSER_GETSTRING
 	case 1: {
 		uint8_t const *string_end;
 		string_end = memrxchrb(self->jp_start, 1, (size_t)(self->jp_pos - self->jp_start));
@@ -659,6 +691,7 @@ again:
 		json_truncate_pos_for_alignment(self, (char *)string_end);
 		result = JSON_PARSER_STRING;
 	}	break;
+#endif /* !LIBJSON_NO_PARSER_GETSTRING */
 
 #ifndef CONFIG_NO_LIBJSON_SUPPORTS_C_COMMENT
 	case '/':
@@ -799,6 +832,183 @@ syn1:
 	return JSON_ERROR_SYNTAX;
 }
 
+/* Same as `libjson_parser_yield()', but don't actually advance the parser (*<ptr>)
+ * @return: JSON_PARSER_*:     The currently selected token
+ * @return: JSON_ERROR_EOF:    The end of the input file has been reached.
+ * @return: JSON_ERROR_SYNTAX: Syntax error. */
+INTERN NONNULL((1)) int
+NOTHROW_NCX(CC libjson_parser_peeknext)(struct json_parser const *__restrict self) {
+	struct json_parser me = *self;
+	char32_t ch;
+	int result;
+again:
+	assert(me.jp_pos >= me.jp_start);
+	assert(me.jp_pos <= me.jp_end);
+	ch = json_getc(&me);
+	switch (ch) {
+
+	case 0:
+		/* Check for end-of-file */
+#ifdef LIBJSON_NO_PARSER_GETSTRING
+		return JSON_ERROR_EOF;
+#else /* LIBJSON_NO_PARSER_GETSTRING */
+		if (me.jp_pos >= me.jp_end)
+			return JSON_ERROR_EOF;
+		result = JSON_PARSER_STRING;
+		break;
+#endif /* !LIBJSON_NO_PARSER_GETSTRING */
+
+#ifndef LIBJSON_NO_PARSER_GETSTRING
+	case 1:
+		result = JSON_PARSER_STRING;
+		break;
+#endif /* !LIBJSON_NO_PARSER_GETSTRING */
+
+#ifndef CONFIG_NO_LIBJSON_SUPPORTS_C_COMMENT
+	case '/':
+		ch = json_getc(&me);
+		if (ch != '*')
+			goto syn;
+		result = json_skip_comment(&me);
+		if (result == JSON_ERROR_OK)
+			goto again;
+		goto done;
+#endif /* !CONFIG_NO_LIBJSON_SUPPORTS_C_COMMENT */
+
+		/* Single-character tokens. */
+	case '[': case ']':
+	case '{': case '}':
+	case ',': case ':':
+	case '\"':
+	case 't':
+	case 'f':
+	case 'n':
+		result = (int)ch;
+		break;
+
+	default:
+		if (unicode_isdigit(ch)) {
+		case '-': case '0':
+		case '1': case '2': case '3':
+		case '4': case '5': case '6':
+		case '7': case '8': case '9':
+			result = JSON_PARSER_NUMBER;
+			break;
+		} else if (unicode_isspace(ch)) {
+		case 0x20: /* Space */
+		case 0x09: /* Horizontal tab */
+		case 0x0a: /* Line feed or New line */
+		case 0x0d: /* Carriage return */
+			goto again; /* Whitespace */
+		}
+		/* Anything else isn't allowed and indicates a syntax error. */
+		goto syn;
+	}
+
+#ifndef CONFIG_NO_LIBJSON_SUPPORTS_C_COMMENT
+done:
+#endif /* !CONFIG_NO_LIBJSON_SUPPORTS_C_COMMENT */
+	return result;
+syn:
+	return JSON_ERROR_SYNTAX;
+}
+
+/* Same as `libjson_parser_unyield()', but don't actually rewind the parser (*(<ptr> - 1))
+ * @return: JSON_PARSER_*:     The previously selected token
+ * @return: JSON_ERROR_EOF:    The start of the input file had already been reached.
+ * @return: JSON_ERROR_SYNTAX: Syntax error. */
+INTERN NONNULL((1)) int
+NOTHROW_NCX(CC libjson_parser_peekprev)(struct json_parser const *__restrict self) {
+	struct json_parser me = *self;
+	char32_t ch;
+	int result;
+again:
+	assert(me.jp_pos >= me.jp_start);
+	assert(me.jp_pos <= me.jp_end);
+	ch = json_ungetc(&me);
+	switch (ch) {
+
+		/* Single-character tokens. */
+	case '[': case ']':
+	case '{': case '}':
+	case ',': case ':':
+	case '\"':
+		result = (int)ch;
+		break;
+
+	case 0:
+#ifdef LIBJSON_NO_PARSER_GETSTRING
+		return JSON_ERROR_EOF;
+#else /* LIBJSON_NO_PARSER_GETSTRING */
+		/* Check for end-of-file */
+		if (me.jp_pos <= me.jp_start)
+			return JSON_ERROR_EOF;
+		/* transformed utf-8 string */
+		result = JSON_PARSER_STRING;
+		break;
+#endif /* !LIBJSON_NO_PARSER_GETSTRING */
+
+#ifndef LIBJSON_NO_PARSER_GETSTRING
+	case 1:
+		result = JSON_PARSER_STRING;
+		break;
+#endif /* !LIBJSON_NO_PARSER_GETSTRING */
+
+#ifndef CONFIG_NO_LIBJSON_SUPPORTS_C_COMMENT
+	case '/':
+		ch = json_ungetc(&me);
+		if (ch != '*')
+			goto syn;
+		result = json_unskip_comment(&me);
+		if (result == JSON_ERROR_OK)
+			goto again;
+		goto done;
+#endif /* !CONFIG_NO_LIBJSON_SUPPORTS_C_COMMENT */
+
+	case 'l':
+		result = JSON_PARSER_NULL;
+		break;
+
+	case 'e':
+		ch = json_ungetc(&me);
+		if (ch == 'u') {
+			result = JSON_PARSER_TRUE;
+		} else if (ch == 's') {
+			result = JSON_PARSER_FALSE;
+		} else {
+			/* 'e' can be trailing character in `0xe' */
+			result = JSON_PARSER_NUMBER;
+		}
+		break;
+
+	default:
+		if (unicode_isdigit(ch)) {
+		case '0': case '1': case '2': case '3':
+		case '4': case '5': case '6': case '7':
+		case '8': case '9':
+		case 'a': case 'b': case 'c': case 'd': /*case 'e':*/ case 'f':
+		case 'A': case 'B': case 'C': case 'D': case 'E': case 'F':
+			result = JSON_PARSER_NUMBER;
+			break;
+		} else if (unicode_isspace(ch)) {
+		case 0x20: /* Space */
+		case 0x09: /* Horizontal tab */
+		case 0x0a: /* Line feed or New line */
+		case 0x0d: /* Carriage return */
+			goto again; /* Whitespace */
+		}
+		/* Anything else isn't allowed and indicates a syntax error. */
+		goto syn;
+	}
+#ifndef CONFIG_NO_LIBJSON_SUPPORTS_C_COMMENT
+done:
+#endif /* !CONFIG_NO_LIBJSON_SUPPORTS_C_COMMENT */
+	return result;
+syn:
+	return JSON_ERROR_SYNTAX;
+}
+
+
 /* Rewind to the start of the current object/array
  * @return: JSON_PARSER_ARRAY:  The parser now points at the first token following the initial `['.
  * @return: JSON_PARSER_OBJECT: The parser now points at the first token following the initial `{'.
@@ -811,13 +1021,13 @@ NOTHROW_NCX(CC libjson_parser_rewind)(struct json_parser *__restrict self) {
 		int tok = libjson_parser_unyield(self);
 		if unlikely(tok <= 0)
 			return JSON_ERROR_SYNTAX;
-		if (tok == '{' || tok == '[') {
+		if (tok == JSON_PARSER_OBJECT || tok == JSON_PARSER_ARRAY) {
 			if (!recursion) {
 				self->jp_pos = temp;
 				return tok;
 			}
 			--recursion;
-		} else if (tok == '}' || tok == ']') {
+		} else if (tok == JSON_PARSER_ENDOBJECT || tok == JSON_PARSER_ENDARRAY) {
 			++recursion;
 		}
 	}
@@ -839,7 +1049,7 @@ NOTHROW_NCX(CC libjson_parser_next)(struct json_parser *__restrict self) {
 		char const *temp = self->jp_pos;
 		int tok = libjson_parser_yield(self);
 		switch (tok) {
-		case ',':
+		case JSON_PARSER_COMMA:
 			if (recursion == 0) {
 				/* Check for a trailing } or ] */
 				temp = self->jp_pos;
@@ -847,17 +1057,19 @@ NOTHROW_NCX(CC libjson_parser_next)(struct json_parser *__restrict self) {
 				if (tok < 0)
 					return JSON_ERROR_SYNTAX;
 				self->jp_pos = temp;
-				if (tok == '}' || tok == ']' || tok == 0)
+				if (tok == JSON_PARSER_ENDOBJECT ||
+				    tok == JSON_PARSER_ENDARRAY ||
+				    tok == JSON_PARSER_EOF)
 					return JSON_ERROR_NOOBJ;
 				return JSON_ERROR_OK;
 			}
 			break;
-		case '{':
-		case '[':
+		case JSON_PARSER_OBJECT:
+		case JSON_PARSER_ARRAY:
 			++recursion;
 			break;
-		case '}':
-		case ']':
+		case JSON_PARSER_ENDOBJECT:
+		case JSON_PARSER_ENDARRAY:
 			if (!recursion) {
 				self->jp_pos = temp;
 				return JSON_ERROR_NOOBJ;
@@ -890,23 +1102,23 @@ NOTHROW_NCX(CC libjson_parser_prev)(struct json_parser *__restrict self,
                                     bool leave_object) {
 	char const *temp = self->jp_pos;
 	int tok = libjson_parser_unyield(self);
-	if (tok == ',') {
+	if (tok == JSON_PARSER_COMMA) {
 		/* There is a predecessor within the same object/array. */
 		tok = libjson_parser_unyield(self);
-		if (tok == '}' || tok == ']') {
+		if (tok == JSON_PARSER_ENDOBJECT || tok == JSON_PARSER_ENDARRAY) {
 			unsigned int recursion = 0;
 			/* The previous component is an object/array */
 			for (;;) {
 				tok = libjson_parser_unyield(self);
 				switch (tok) {
-				case '{':
-				case '[':
+				case JSON_PARSER_OBJECT:
+				case JSON_PARSER_ARRAY:
 					if (!recursion)
 						goto check_field_label;
 					--recursion;
 					break;
-				case '}':
-				case ']':
+				case JSON_PARSER_ENDOBJECT:
+				case JSON_PARSER_ENDARRAY:
 					++recursion;
 					break;
 				default:
@@ -920,7 +1132,7 @@ check_field_label:
 		/* Check for object-field label. */
 		temp = self->jp_pos;
 		tok  = libjson_parser_unyield(self);
-		if (tok == ':') {
+		if (tok == JSON_PARSER_COLON) {
 			tok = libjson_parser_unyield(self);
 			if (tok != JSON_PARSER_STRING)
 				return JSON_ERROR_SYNTAX;
@@ -928,14 +1140,14 @@ check_field_label:
 			self->jp_pos = temp;
 		}
 		return JSON_ERROR_OK;
-	} else if (tok == '{' || tok == '[') {
+	} else if (tok == JSON_PARSER_OBJECT || tok == JSON_PARSER_ARRAY) {
 		/* Start of object has been reached. */
 		if (!leave_object) {
 			self->jp_pos = temp;
 		} else {
 			temp = self->jp_pos;
 			tok  = libjson_parser_unyield(self);
-			if (tok == ':') {
+			if (tok == JSON_PARSER_COLON) {
 				tok = libjson_parser_unyield(self);
 				if (tok != JSON_PARSER_STRING)
 					return JSON_ERROR_SYNTAX;
@@ -962,8 +1174,8 @@ NOTHROW_NCX(CC libjson_parser_enter_something)(struct json_parser *__restrict se
                                                bool allow_array) {
 	char const *temp = self->jp_pos;
 	int tok = libjson_parser_yield(self);
-	if ((tok == '{' && allow_object) ||
-	    (tok == '[' && allow_array))
+	if ((tok == JSON_PARSER_OBJECT && allow_object) ||
+	    (tok == JSON_PARSER_ARRAY && allow_array))
 		return JSON_ERROR_OK;
 	if (tok < 0)
 		return JSON_ERROR_SYNTAX;
@@ -1001,21 +1213,21 @@ NOTHROW_NCX(CC libjson_parser_leave_something)(struct json_parser *__restrict se
 	unsigned int recursion = 0;
 	for (;;) {
 		int tok = libjson_parser_yield(self);
-		if (tok == '}' || tok == ']') {
+		if (tok == JSON_PARSER_ENDOBJECT || tok == JSON_PARSER_ENDARRAY) {
 			if (!recursion) {
 				char const *prev;
 				if (!allow_object || !allow_array) {
 					if (allow_object) {
-						if (tok != '}')
+						if (tok != JSON_PARSER_ENDOBJECT)
 							return JSON_ERROR_SYNTAX;
 					} else {
-						if (tok != ']')
+						if (tok != JSON_PARSER_ENDARRAY)
 							return JSON_ERROR_SYNTAX;
 					}
 				}
 				prev = self->jp_pos;
 				tok = libjson_parser_yield(self);
-				if (tok == ',')
+				if (tok == JSON_PARSER_COMMA)
 					return JSON_ERROR_OK;
 				if (tok == 0)
 					return JSON_ERROR_EOF;
@@ -1023,7 +1235,7 @@ NOTHROW_NCX(CC libjson_parser_leave_something)(struct json_parser *__restrict se
 				return JSON_ERROR_OK;
 			}
 			--recursion;
-		} else if (tok == '{' || tok == '[') {
+		} else if (tok == JSON_PARSER_OBJECT || tok == JSON_PARSER_ARRAY) {
 			++recursion;
 		}
 		if (tok <= 0) {
@@ -1050,17 +1262,6 @@ NOTHROW_NCX(CC libjson_parser_leavearray)(struct json_parser *__restrict self) {
 }
 
 
-/* Returns the current parser state / token type.
- * @return: JSON_PARSER_*: The current parser state.
- * @return: JSON_ERROR_SYNTAX: Syntax error. */
-INTERN NONNULL((1)) int
-NOTHROW_NCX(CC libjson_parser_state)(struct json_parser *__restrict self) {
-	char const *temp = self->jp_pos;
-	int result = libjson_parser_yield(self);
-	self->jp_pos = temp;
-	return result;
-}
-
 /* Search for the given key within the current object.
  * The given key is searched in both forward, and backward direction, starting
  * at the current parser location. - If  the key exists multiple times, it  is
@@ -1082,9 +1283,9 @@ again:
 		if (result == JSON_ERROR_NOOBJ) {
 			/* Check if we were pointing at a comma. - If so, continue searching after it. */
 			tok = libjson_parser_yield(self);
-			if (tok == ',')
+			if (tok == JSON_PARSER_COMMA)
 				goto again;
-			if (tok == '}')
+			if (tok == JSON_PARSER_ENDOBJECT)
 				break; /* End-of-object (fall-through to the rewind below to search everything prior) */
 			self->jp_pos = start;
 			return JSON_ERROR_SYNTAX;
@@ -1092,10 +1293,11 @@ again:
 		if (result == JSON_ERROR_SYNTAX)
 			return JSON_ERROR_SYNTAX;
 		tok = libjson_parser_yield(self);
-		if (tok != ':')
+		if (tok != JSON_PARSER_COLON)
 			return JSON_ERROR_SYNTAX;
 		if (result == JSON_ERROR_OK)
 			return JSON_ERROR_OK; /* Found it! (The parser now points at the field's value) */
+
 		/* Advance to the next field. */
 		result = libjson_parser_next(self);
 		if (result != JSON_ERROR_OK) {
@@ -1105,6 +1307,7 @@ again:
 			return result; /* JSON_ERROR_SYNTAX */
 		}
 	}
+
 	/* Move back to the start of the object, and search for the key from there. */
 	self->jp_pos = start;
 	result = libjson_parser_rewind(self);
@@ -1115,10 +1318,11 @@ again:
 		if (result == JSON_ERROR_SYNTAX || result == JSON_ERROR_NOOBJ)
 			return JSON_ERROR_SYNTAX;
 		tok = libjson_parser_yield(self);
-		if (tok != ':')
+		if (tok != JSON_PARSER_COLON)
 			return JSON_ERROR_SYNTAX;
 		if (result == JSON_ERROR_OK)
 			return JSON_ERROR_OK; /* Found it! (The parser now points at the field's value) */
+
 		/* Advance to the next field. */
 		result = libjson_parser_next(self);
 		if (result != JSON_ERROR_OK) {
@@ -1128,11 +1332,13 @@ again:
 			return result; /* JSON_ERROR_SYNTAX */
 		}
 	}
+
 	/* Failed to find the key... */
 	self->jp_pos = start;
 	return JSON_ERROR_NOOBJ;
 }
 
+#ifndef LIBJSON_NO_PARSER_FINDINDEX
 /* Goto  the  `index'th'  array element  before  returning `JSON_ERROR_OK'
  * The parser is rewound to the start of the current array before skipping
  * exactly `index' elements, thus causing that element to end up selected.
@@ -1152,6 +1358,7 @@ NOTHROW_NCX(CC libjson_parser_findindex)(struct json_parser *__restrict self,
 	if unlikely(result != JSON_PARSER_ARRAY) {
 		return JSON_ERROR_SYNTAX;
 	}
+
 	/* Advance to the given index. */
 	for (; index != 0; --index) {
 		result = libjson_parser_next(self);
@@ -1163,6 +1370,7 @@ NOTHROW_NCX(CC libjson_parser_findindex)(struct json_parser *__restrict self,
 	}
 	return JSON_ERROR_OK;
 }
+#endif /* !LIBJSON_NO_PARSER_FINDINDEX */
 
 
 struct format_compare_data {
@@ -1178,8 +1386,9 @@ format_compare_string(void *arg,
 	compare_data = (struct format_compare_data *)arg;
 	if (datalen > compare_data->len)
 		return -1; /* Json string is too long */
-	if (bcmp(compare_data->str, data, datalen, sizeof(char)) != 0)
+	if (bcmpc(compare_data->str, data, datalen, sizeof(char)) != 0)
 		return -1; /* Json string isn't equal */
+
 	/* Consume data that has already been compared. */
 	compare_data->str += datalen;
 	compare_data->len -= datalen;
@@ -1233,6 +1442,7 @@ NOTHROW_NCX(CC libjson_parser_printstring)(struct json_parser *__restrict self,
 	char32_t ch = json_getc(self);
 	ssize_t printer_result, temp;
 	if (ch != '\"') {
+#ifndef LIBJSON_NO_PARSER_GETSTRING
 		if (ch == 0) {
 			/* Transformed utf-8 string */
 			size_t len = strlen(self->jp_pos);
@@ -1249,12 +1459,15 @@ NOTHROW_NCX(CC libjson_parser_printstring)(struct json_parser *__restrict self,
 			*pprinter_result = 0;
 			return JSON_ERROR_OK;
 		}
+#endif /* !LIBJSON_NO_PARSER_GETSTRING */
+
 		/* Not a string */
 		self->jp_pos = start;
 		return JSON_ERROR_NOOBJ;
 	}
 	bufend = buf;
 	printer_result = 0;
+
 	/* Parse the string! */
 	for (;;) {
 		ch = json_getc(self);
@@ -1317,13 +1530,16 @@ NOTHROW_NCX(CC libjson_parser_printstring)(struct json_parser *__restrict self,
 				printer_result += temp;
 				bufend = buf;
 			}
+
 			/* Append the loaded character to the buffer */
 			bufend = unicode_writeutf8(bufend, ch);
 		}
 	}
 done:
+
 	/* Skip trailing whitespace. */
 	json_skip_whitespace(self);
+
 	/* Flush all unwritten data. */
 	if (bufend != buf && likely(printer_result >= 0)) {
 		temp = (*printer)(arg, buf, (size_t)(bufend - buf));
@@ -1341,6 +1557,7 @@ done:
 
 
 
+#ifndef LIBJSON_NO_PARSER_GETSTRING
 PRIVATE NONNULL((1, 2)) ssize_t FORMATPRINTER_CC
 json_inline_convert_string(void *arg,
                            /*utf-8*/ char const *__restrict data,
@@ -1357,7 +1574,6 @@ json_inline_convert_string(void *arg,
 
 
 INTERN_CONST char const libjson_empty_string[1] = { 0 };
-
 
 /* A somewhat hacky variant of `libjson_parser_printstring()', which replaces the source
  * string  in-line (thus  modifying the source  string) with its  utf-8 encoded variant.
@@ -1384,9 +1600,11 @@ NOTHROW_NCX(CC libjson_parser_getstring)(struct json_parser *__restrict self,
 	ssize_t total_length;
 	if (ch == 0) {
 		size_t len;
+
 		/* Already utf-8 encoded. */
 		start = self->jp_pos;
 		len = strlen(start);
+
 		/* Advance to the end of the string. */
 		json_skip_utf8string_trailing_nuls(self, start + len);
 		if (plength)
@@ -1401,6 +1619,7 @@ do_return_empty_string:
 	}
 	dst = (char *)self->jp_pos;
 	self->jp_pos = start;
+
 	/* Parse + inline-convert the string to utf-8 */
 	dst_writer = dst;
 	error = libjson_parser_printstring(self,
@@ -1415,13 +1634,15 @@ do_return_empty_string:
 			*perror = error;
 		return NULL;
 	}
+
 	/* Filter out nul characters prior to the end of the string. */
 	total_length = strnlen(dst, total_length);
 	if unlikely(!total_length) {
 		/* Special case: empty string. */
-		memset((char *)start, 1, (size_t)(self->jp_pos - start), sizeof(char));
+		memsetc((char *)start, 1, (size_t)(self->jp_pos - start), sizeof(char));
 		goto do_return_empty_string;
 	}
+
 	/* Normal, inlined utf-8 string -> Initialize leading and trailing markers. */
 	assert(dst > start);
 	assert(self->jp_pos > (dst + total_length));
@@ -1429,10 +1650,12 @@ do_return_empty_string:
 	bzero((char *)dst + total_length, (size_t)(self->jp_pos - (dst + total_length)), sizeof(char));
 	return dst;
 }
+#endif /* !LIBJSON_NO_PARSER_GETSTRING */
 
 
 
 
+#ifndef LIBJSON_NO_PARSER_GETNUMBER
 /* Decode a Json number and store its value in `*presult'
  * @return: JSON_ERROR_OK:     Success. - The number is stored in `*presult'
  *                             In this case the parser points at the first token after the number
@@ -1494,11 +1717,13 @@ again_parse_ch:
 		new_result = (result * radix) + digit;
 		if (new_result < result) {
 			result = new_result;
+
 			/* Check  for special case: INTPTR_MIN, as well
 			 * as the fact that `INTPTR_MIN == -INTPTR_MIN' */
 			if (new_result == INTPTR_MIN && negative) {
 				start = self->jp_pos;
 				ch = json_getc(self);
+
 				/* If this was the last digit, then the
 				 * number  doesn't  actually  overflow! */
 				if (!unicode_isdigit(ch)) {
@@ -1523,9 +1748,11 @@ again_parse_ch:
 		}
 		break;
 	}
-	/* Skip trailing whitespace. */
+
 done:
+	/* Skip trailing whitespace. */
 	json_skip_whitespace_at(self, ch, start);
+
 	/* Store the generated integer.
 	 * NOTE: The special case where `INTPTR_MIN == -INTPTR_MIN'
 	 *       is already handled  above by  the overflow  check! */
@@ -1618,9 +1845,11 @@ again_parse_ch:
 		}
 		break;
 	}
-	/* Skip trailing whitespace. */
+
 done:
+	/* Skip trailing whitespace. */
 	json_skip_whitespace_at(self, ch, start);
+
 	/* Store the generated integer.
 	 * NOTE: The special case where `INTPTR_MIN == -INTPTR_MIN'
 	 *       is already handled  above by  the overflow  check! */
@@ -1705,8 +1934,10 @@ NOTHROW_NCX(CC libjson_parser_getfloat)(struct json_parser *__restrict self,
 			result *= exp;
 		}
 	}
+
 	/* Skip trailing whitespace. */
 	json_skip_whitespace_at(self, ch, start);
+
 	/* Store the generated integer. */
 	if (negative)
 		result = -result;
@@ -1714,8 +1945,10 @@ NOTHROW_NCX(CC libjson_parser_getfloat)(struct json_parser *__restrict self,
 	return JSON_ERROR_OK;
 }
 #endif /* !__NO_FPU */
+#endif /* !LIBJSON_NO_PARSER_GETNUMBER */
 
 
+#ifndef LIBJSON_NO_PARSER_GETBOOL
 /* Decode a Json boolean and store its value in `*presult'
  * @return: JSON_ERROR_OK:     Success. - The value is stored in `*presult'
  *                             In this case the parser points at the first token after an optional trailing `,'
@@ -1739,8 +1972,10 @@ NOTHROW_NCX(CC libjson_parser_getbool)(struct json_parser *__restrict self,
 	}
 	return JSON_ERROR_OK;
 }
+#endif /* !LIBJSON_NO_PARSER_GETBOOL */
 
-/* Decode a Json null-value
+#ifndef LIBJSON_NO_PARSER_GETNULL
+/* Decode a JSON null-value
  * @return: JSON_ERROR_OK:     Success.
  *                             In this case the parser points at the first token after an optional trailing `,'
  * @return: JSON_ERROR_NOOBJ:  The  parser  didn't  point at  a  `null' token.
@@ -1760,12 +1995,15 @@ NOTHROW_NCX(CC libjson_parser_getnull)(struct json_parser *__restrict self) {
 	}
 	return JSON_ERROR_OK;
 }
+#endif /* !LIBJSON_NO_PARSER_GETNULL */
 
 
 
 DEFINE_PUBLIC_ALIAS(json_parser_init, libjson_parser_init);
 DEFINE_PUBLIC_ALIAS(json_parser_yield, libjson_parser_yield);
 DEFINE_PUBLIC_ALIAS(json_parser_unyield, libjson_parser_unyield);
+DEFINE_PUBLIC_ALIAS(json_parser_peeknext, libjson_parser_peeknext);
+DEFINE_PUBLIC_ALIAS(json_parser_peekprev, libjson_parser_peekprev);
 DEFINE_PUBLIC_ALIAS(json_parser_rewind, libjson_parser_rewind);
 DEFINE_PUBLIC_ALIAS(json_parser_next, libjson_parser_next);
 DEFINE_PUBLIC_ALIAS(json_parser_prev, libjson_parser_prev);
@@ -1775,20 +2013,29 @@ DEFINE_PUBLIC_ALIAS(json_parser_enterarray, libjson_parser_enterarray);
 DEFINE_PUBLIC_ALIAS(json_parser_leave, libjson_parser_leave);
 DEFINE_PUBLIC_ALIAS(json_parser_leaveobject, libjson_parser_leaveobject);
 DEFINE_PUBLIC_ALIAS(json_parser_leavearray, libjson_parser_leavearray);
-DEFINE_PUBLIC_ALIAS(json_parser_state, libjson_parser_state);
 DEFINE_PUBLIC_ALIAS(json_parser_findkey, libjson_parser_findkey);
+#ifndef LIBJSON_NO_PARSER_FINDINDEX
 DEFINE_PUBLIC_ALIAS(json_parser_findindex, libjson_parser_findindex);
+#endif /* !LIBJSON_NO_PARSER_FINDINDEX */
 DEFINE_PUBLIC_ALIAS(json_parser_eqstring, libjson_parser_eqstring);
 DEFINE_PUBLIC_ALIAS(json_parser_printstring, libjson_parser_printstring);
+#ifndef LIBJSON_NO_PARSER_GETSTRING
 DEFINE_PUBLIC_ALIAS(json_parser_getstring, libjson_parser_getstring);
+#endif /* !LIBJSON_NO_PARSER_GETSTRING */
+#ifndef LIBJSON_NO_PARSER_GETNUMBER
 DEFINE_PUBLIC_ALIAS(json_parser_getnumber, libjson_parser_getnumber);
 DEFINE_PUBLIC_ALIAS(json_parser_getint64, libjson_parser_getint64);
 DEFINE_PUBLIC_ALIAS(json_parser_getuint64, libjson_parser_getuint64);
 #ifndef __NO_FPU
 DEFINE_PUBLIC_ALIAS(json_parser_getfloat, libjson_parser_getfloat);
 #endif /* !__NO_FPU */
+#endif /* !LIBJSON_NO_PARSER_GETNUMBER */
+#ifndef LIBJSON_NO_PARSER_GETBOOL
 DEFINE_PUBLIC_ALIAS(json_parser_getbool, libjson_parser_getbool);
+#endif /* !LIBJSON_NO_PARSER_GETBOOL */
+#ifndef LIBJSON_NO_PARSER_GETNULL
 DEFINE_PUBLIC_ALIAS(json_parser_getnull, libjson_parser_getnull);
+#endif /* !LIBJSON_NO_PARSER_GETNULL */
 
 DECL_END
 
