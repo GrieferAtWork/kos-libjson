@@ -104,6 +104,7 @@ INTDEF NONNULL((1)) int
 NOTHROW_NCX(CC libjson_parser_prev)(struct json_parser *__restrict self,
                                     bool leave_object);
 
+#ifndef LIBJSON_NO_PARSER_ENTER_LEAVE
 /* Advance the parser to the next object sibling
  * @return: JSON_ERROR_OK:    The parser now points at first member/index of the inner object/array.
  * @return: JSON_ERROR_NOOBJ: The parser didn't point at `{' or `[' (its position remains unchanged).
@@ -128,6 +129,7 @@ INTDEF NONNULL((1)) int
 NOTHROW_NCX(CC libjson_parser_leaveobject)(struct json_parser *__restrict self);
 INTDEF NONNULL((1)) int
 NOTHROW_NCX(CC libjson_parser_leavearray)(struct json_parser *__restrict self);
+#endif /* !LIBJSON_NO_PARSER_ENTER_LEAVE */
 
 
 /* Search for the given key within the current object.
@@ -229,6 +231,8 @@ NOTHROW_NCX(CC libjson_parser_getint64)(struct json_parser *__restrict self,
 INTDEF NONNULL((1, 2)) int
 NOTHROW_NCX(CC libjson_parser_getuint64)(struct json_parser *__restrict self,
                                          uint64_t *__restrict presult);
+#endif /* !LIBJSON_NO_PARSER_GETNUMBER */
+#ifndef LIBJSON_NO_PARSER_GETFLOAT
 #ifndef __NO_FPU
 INTDEF NONNULL((1, 2)) int
 NOTHROW_NCX(CC libjson_parser_getfloat)(struct json_parser *__restrict self,

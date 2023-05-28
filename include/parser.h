@@ -218,6 +218,7 @@ __NOTHROW_NCX(LIBJSON_CC json_parser_prev)(struct json_parser *__restrict __self
                                            __BOOL __leave_object);
 #endif /* LIBJSON_WANT_PROTOTYPES */
 
+#ifndef LIBJSON_NO_PARSER_ENTER_LEAVE
 /* Advance the parser to the first member/index of an object/array
  * @return: JSON_ERROR_OK:    The parser now points at first member/index of the inner object/array.
  * @return: JSON_ERROR_NOOBJ: The parser didn't point at `{' or `[' (its position remains unchanged).
@@ -246,6 +247,7 @@ LIBJSON_DECL __ATTR_NONNULL((1)) int __NOTHROW_NCX(LIBJSON_CC json_parser_leave)
 LIBJSON_DECL __ATTR_NONNULL((1)) int __NOTHROW_NCX(LIBJSON_CC json_parser_leaveobject)(struct json_parser *__restrict __self);
 LIBJSON_DECL __ATTR_NONNULL((1)) int __NOTHROW_NCX(LIBJSON_CC json_parser_leavearray)(struct json_parser *__restrict __self);
 #endif /* LIBJSON_WANT_PROTOTYPES */
+#endif /* !LIBJSON_NO_PARSER_ENTER_LEAVE */
 
 
 /* Search for the given key within the current object.
@@ -375,12 +377,16 @@ __NOTHROW_NCX_T(LIBJSON_CC *PJSON_PARSER_GETINT64)(struct json_parser *__restric
 typedef __ATTR_NONNULL_T((1, 2)) int
 __NOTHROW_NCX_T(LIBJSON_CC *PJSON_PARSER_GETUINT64)(struct json_parser *__restrict __self,
                                                     __uint64_t *__restrict __presult);
+#endif /* !LIBJSON_NO_PARSER_GETNUMBER */
+#ifndef LIBJSON_NO_PARSER_GETFLOAT
 #ifndef __NO_FPU
 typedef __ATTR_NONNULL_T((1, 2)) int
 __NOTHROW_NCX_T(LIBJSON_CC *PJSON_PARSER_GETFLOAT)(struct json_parser *__restrict __self,
                                                    double *__restrict __presult);
 #endif /* !__NO_FPU */
+#endif /* !LIBJSON_NO_PARSER_GETFLOAT */
 #ifdef LIBJSON_WANT_PROTOTYPES
+#ifndef LIBJSON_NO_PARSER_GETNUMBER
 LIBJSON_DECL __ATTR_NONNULL((1, 2)) int
 __NOTHROW_NCX(LIBJSON_CC json_parser_getnumber)(struct json_parser *__restrict __self,
                                                 __intptr_t *__restrict __presult);
@@ -390,13 +396,15 @@ __NOTHROW_NCX(LIBJSON_CC json_parser_getint64)(struct json_parser *__restrict __
 LIBJSON_DECL __ATTR_NONNULL((1, 2)) int
 __NOTHROW_NCX(LIBJSON_CC json_parser_getuint64)(struct json_parser *__restrict __self,
                                                 __uint64_t *__restrict __presult);
+#endif /* !LIBJSON_NO_PARSER_GETNUMBER */
+#ifndef LIBJSON_NO_PARSER_GETFLOAT
 #ifndef __NO_FPU
 LIBJSON_DECL __ATTR_NONNULL((1, 2)) int
 __NOTHROW_NCX(LIBJSON_CC json_parser_getfloat)(struct json_parser *__restrict __self,
                                                double *__restrict __presult);
 #endif /* !__NO_FPU */
+#endif /* !LIBJSON_NO_PARSER_GETFLOAT */
 #endif /* LIBJSON_WANT_PROTOTYPES */
-#endif /* !LIBJSON_NO_PARSER_GETNUMBER */
 
 #ifndef LIBJSON_NO_PARSER_GETBOOL
 /* Decode a Json boolean and store its value in `*presult'

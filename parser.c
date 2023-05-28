@@ -1164,6 +1164,7 @@ check_field_label:
 	return JSON_ERROR_SYNTAX;
 }
 
+#ifndef LIBJSON_NO_PARSER_ENTER_LEAVE
 /* Advance the parser to the next object sibling
  * @return: JSON_ERROR_OK:    The parser now points at first member/index of the inner object/array.
  * @return: JSON_ERROR_NOOBJ: The parser didn't point at `{' or `[' (its position remains unchanged).
@@ -1260,6 +1261,7 @@ INTERN NONNULL((1)) int
 NOTHROW_NCX(CC libjson_parser_leavearray)(struct json_parser *__restrict self) {
 	return libjson_parser_leave_something(self, false, true);
 }
+#endif /* !LIBJSON_NO_PARSER_ENTER_LEAVE */
 
 
 /* Search for the given key within the current object.
@@ -1655,7 +1657,6 @@ do_return_empty_string:
 
 
 
-#ifndef LIBJSON_NO_PARSER_GETNUMBER
 /* Decode a Json number and store its value in `*presult'
  * @return: JSON_ERROR_OK:     Success. - The number is stored in `*presult'
  *                             In this case the parser points at the first token after the number
@@ -1666,6 +1667,7 @@ do_return_empty_string:
  *                             NOTE:  Not  returned  by   `json_parser_getfloat()'!
  *                             In this case `*presult' is filled with the truncated
  *                             integer value, and the parser points at the first token after the number */
+#ifndef LIBJSON_NO_PARSER_GETNUMBER
 INTERN NONNULL((1, 2)) int
 NOTHROW_NCX(CC libjson_parser_getnumber)(struct json_parser *__restrict self,
                                          intptr_t *__restrict presult) {
@@ -1860,7 +1862,9 @@ done:
 }
 #endif /* __SIZEOF_POINTER__ < 8 */
 DEFINE_INTERN_ALIAS(libjson_parser_getuint64, libjson_parser_getint64);
+#endif /* !LIBJSON_NO_PARSER_GETNUMBER */
 
+#ifndef LIBJSON_NO_PARSER_GETFLOAT
 #ifndef __NO_FPU
 INTERN NONNULL((1, 2)) int
 NOTHROW_NCX(CC libjson_parser_getfloat)(struct json_parser *__restrict self,
@@ -1868,8 +1872,7 @@ NOTHROW_NCX(CC libjson_parser_getfloat)(struct json_parser *__restrict self,
 	char const *start = self->jp_pos;
 	char32_t ch = json_getc(self);
 	bool negative = false;
-	intptr_t result_whole;
-	double result, result_frac;
+	double result;
 	if (ch == '-') {
 		ch = json_getc(self);
 		negative = true;
@@ -1880,58 +1883,52 @@ NOTHROW_NCX(CC libjson_parser_getfloat)(struct json_parser *__restrict self,
 		self->jp_pos = start;
 		return JSON_ERROR_NOOBJ; /* Not an integer. */
 	}
-	result_whole = 0;
+	result = 0.0;
 	do {
-		result_whole *= 10;
-		result_whole += unicode_getnumeric(ch);
+		result = result * 10 + unicode_getnumeric(ch);
 		start = self->jp_pos;
 		ch = json_getc(self);
 	} while (unicode_isdigit(ch));
-	result_frac = 0.0;
 	if (ch == '.') {
-		uintptr_t base = 10;
+		uintptr_t divisor = 10;
 		ch = json_getc(self);
 		if (!unicode_isdigit(ch))
 			return JSON_ERROR_SYNTAX;
 		do {
-			base *= 10;
-			result_frac *= 10.0;
-			result_frac += unicode_getnumeric(ch);
+			result += (double)unicode_getnumeric(ch) / (double)divisor;
+			divisor *= 10;
 			start = self->jp_pos;
 			ch = json_getc(self);
 		} while (unicode_isdigit(ch));
-		result_frac /= (double)base;
 	}
-	result = (double)result_whole + result_frac;
+
+	/* Deal with floating point exponents */
 	if (ch == 'e' || ch == 'E') {
-		bool exp_negative = false;
-		uintptr_t exp = 0;
+		bool float_extension_pos = true;
+		uintptr_t float_extension_off = 0;
+		uintptr_t float_extension_mult;
 		ch = json_getc(self);
 		if (ch == '+' || ch == '-') {
-			exp_negative = ch == '-';
+			float_extension_pos = ch == '+';
 			ch = json_getc(self);
 		}
 		if (!unicode_isdigit(ch))
 			return JSON_ERROR_SYNTAX;
 		do {
-			exp *= 10;
-			exp += unicode_getnumeric(ch);
+			float_extension_off *= 10;
+			float_extension_off += unicode_getnumeric(ch);
 			start = self->jp_pos;
 			ch = json_getc(self);
 		} while (unicode_isdigit(ch));
-		/* TODO: Use the same trick for converting string->float
-		 *       as is  also  being  used  by  `format_scanf()'!
-		 *       It's much more precise, and doesn't require any
-		 *       functions from <math.h>! */
-#ifdef __USE_GNU
-		exp = pow10(exp);
-#else /* __USE_GNU */
-		exp = pow(10.0, exp);
-#endif /* !__USE_GNU */
-		if (exp_negative) {
-			result /= exp;
+		float_extension_mult = 1;
+		while (float_extension_off != 0) {
+			float_extension_mult *= 10;
+			--float_extension_off;
+		}
+		if (float_extension_pos) {
+			result *= float_extension_mult;
 		} else {
-			result *= exp;
+			result /= float_extension_mult;
 		}
 	}
 
@@ -1945,7 +1942,7 @@ NOTHROW_NCX(CC libjson_parser_getfloat)(struct json_parser *__restrict self,
 	return JSON_ERROR_OK;
 }
 #endif /* !__NO_FPU */
-#endif /* !LIBJSON_NO_PARSER_GETNUMBER */
+#endif /* !LIBJSON_NO_PARSER_GETFLOAT */
 
 
 #ifndef LIBJSON_NO_PARSER_GETBOOL
@@ -2007,12 +2004,14 @@ DEFINE_PUBLIC_ALIAS(json_parser_peekprev, libjson_parser_peekprev);
 DEFINE_PUBLIC_ALIAS(json_parser_rewind, libjson_parser_rewind);
 DEFINE_PUBLIC_ALIAS(json_parser_next, libjson_parser_next);
 DEFINE_PUBLIC_ALIAS(json_parser_prev, libjson_parser_prev);
+#ifndef LIBJSON_NO_PARSER_ENTER_LEAVE
 DEFINE_PUBLIC_ALIAS(json_parser_enter, libjson_parser_enter);
 DEFINE_PUBLIC_ALIAS(json_parser_enterobject, libjson_parser_enterobject);
 DEFINE_PUBLIC_ALIAS(json_parser_enterarray, libjson_parser_enterarray);
 DEFINE_PUBLIC_ALIAS(json_parser_leave, libjson_parser_leave);
 DEFINE_PUBLIC_ALIAS(json_parser_leaveobject, libjson_parser_leaveobject);
 DEFINE_PUBLIC_ALIAS(json_parser_leavearray, libjson_parser_leavearray);
+#endif /* !LIBJSON_NO_PARSER_ENTER_LEAVE */
 DEFINE_PUBLIC_ALIAS(json_parser_findkey, libjson_parser_findkey);
 #ifndef LIBJSON_NO_PARSER_FINDINDEX
 DEFINE_PUBLIC_ALIAS(json_parser_findindex, libjson_parser_findindex);
@@ -2026,10 +2025,12 @@ DEFINE_PUBLIC_ALIAS(json_parser_getstring, libjson_parser_getstring);
 DEFINE_PUBLIC_ALIAS(json_parser_getnumber, libjson_parser_getnumber);
 DEFINE_PUBLIC_ALIAS(json_parser_getint64, libjson_parser_getint64);
 DEFINE_PUBLIC_ALIAS(json_parser_getuint64, libjson_parser_getuint64);
+#endif /* !LIBJSON_NO_PARSER_GETNUMBER */
+#ifndef LIBJSON_NO_PARSER_GETFLOAT
 #ifndef __NO_FPU
 DEFINE_PUBLIC_ALIAS(json_parser_getfloat, libjson_parser_getfloat);
 #endif /* !__NO_FPU */
-#endif /* !LIBJSON_NO_PARSER_GETNUMBER */
+#endif /* !LIBJSON_NO_PARSER_GETFLOAT */
 #ifndef LIBJSON_NO_PARSER_GETBOOL
 DEFINE_PUBLIC_ALIAS(json_parser_getbool, libjson_parser_getbool);
 #endif /* !LIBJSON_NO_PARSER_GETBOOL */
