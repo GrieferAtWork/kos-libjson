@@ -1905,8 +1905,8 @@ NOTHROW_NCX(CC libjson_parser_getfloat)(struct json_parser *__restrict self,
 	/* Deal with floating point exponents */
 	if (ch == 'e' || ch == 'E') {
 		bool float_extension_pos = true;
+		double float_extension_mult;
 		uintptr_t float_extension_off = 0;
-		uintptr_t float_extension_mult;
 		ch = json_getc(self);
 		if (ch == '+' || ch == '-') {
 			float_extension_pos = ch == '+';
